@@ -1353,14 +1353,9 @@ function ActiveRoundScreen({ round, onUpdateHole, onFinish, onAbandon, onBack, b
         title={round.course_name}
         subtitle={fmtDate(round.date)}
         right={
-          <div style={{display:'flex', gap:6}}>
-            <button className="btn-icon" onClick={onCaddy} aria-label="Green reads" title="Green reads">
-              <Compass size={18}/>
-            </button>
-            <button className="btn-icon" onClick={() => setShowFinish(true)} aria-label="Finish round">
-              <Check size={18}/>
-            </button>
-          </div>
+          <button className="btn-icon" onClick={() => setShowFinish(true)} aria-label="Finish round">
+            <Check size={18}/>
+          </button>
         }
       />
 
@@ -1438,6 +1433,28 @@ function ActiveRoundScreen({ round, onUpdateHole, onFinish, onAbandon, onBack, b
             })}
           </div>
         )}
+      </div>
+
+      {/* Greens button */}
+      <div className="px-5 pb-3">
+        <button
+          onClick={onCaddy}
+          style={{
+            width:'100%', padding:'14px 18px',
+            background:'var(--ink)', color:'var(--surface)',
+            border:'none', borderRadius:14, cursor:'pointer',
+            display:'flex', alignItems:'center', justifyContent:'space-between',
+            fontFamily:'DM Sans, sans-serif',
+          }}>
+          <div style={{display:'flex', alignItems:'center', gap:10}}>
+            <span style={{fontSize:22, lineHeight:1}}>⛳</span>
+            <div style={{textAlign:'left'}}>
+              <div style={{fontSize:15, fontWeight:700, letterSpacing:'0.01em'}}>Greens</div>
+              <div style={{fontSize:11, opacity:0.6, letterSpacing:'0.06em', textTransform:'uppercase', marginTop:1}}>Reads · slopes · breaks</div>
+            </div>
+          </div>
+          <Compass size={18} style={{opacity:0.5}}/>
+        </button>
       </div>
 
       {/* Current hole */}
