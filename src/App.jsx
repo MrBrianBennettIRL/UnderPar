@@ -1329,7 +1329,7 @@ function NewRoundScreen({ db, onCreate, onBack }){
 // ==============================
 // ACTIVE ROUND
 // ==============================
-function ActiveRoundScreen({ round, onUpdateHole, onFinish, onAbandon, onBack, bag, onClubUsed, clubStats, suggestionsEnabled, handicap }){
+function ActiveRoundScreen({ round, onUpdateHole, onFinish, onAbandon, onBack, bag, onClubUsed, clubStats, suggestionsEnabled, handicap, onCaddy }){
   const [holeIdx, setHoleIdx] = useState(() => {
     const i = round.holes.findIndex(h => !h.shots?.some(s => s.lie_after === 'hole'));
     return i === -1 ? 0 : i;
@@ -1353,9 +1353,14 @@ function ActiveRoundScreen({ round, onUpdateHole, onFinish, onAbandon, onBack, b
         title={round.course_name}
         subtitle={fmtDate(round.date)}
         right={
-          <button className="btn-icon" onClick={() => setShowFinish(true)} aria-label="Finish round">
-            <Check size={18}/>
-          </button>
+          <div style={{display:'flex', gap:6}}>
+            <button className="btn-icon" onClick={onCaddy} aria-label="Green reads" title="Green reads">
+              <Compass size={18}/>
+            </button>
+            <button className="btn-icon" onClick={() => setShowFinish(true)} aria-label="Finish round">
+              <Check size={18}/>
+            </button>
+          </div>
         }
       />
 
@@ -3073,6 +3078,7 @@ export default function App(){
           clubStats={clubStats}
           suggestionsEnabled={suggestionsEnabled}
           handicap={(db.settings || {}).handicap}
+          onCaddy={openCaddy}
         />
       )}
       {view === 'roundDetail' && selectedRoundId && db.rounds[selectedRoundId] && (
