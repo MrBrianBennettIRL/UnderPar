@@ -185,13 +185,14 @@ const COUNTRY_LABELS = {
 
 const LIE_LABEL = {
   tee: 'Tee', fairway: 'Fairway', rough: 'Rough', sand: 'Sand',
-  recovery: 'Recovery', green: 'Green', hole: 'Holed'
+  recovery: 'Recovery', green: 'Green', hole: 'Holed', topped: 'Topped'
 };
 const LIE_PICKER = [
   { id: 'fairway',  label: 'Fairway' },
   { id: 'rough',    label: 'Rough' },
   { id: 'sand',     label: 'Sand' },
   { id: 'recovery', label: 'Recovery' },
+  { id: 'topped',   label: 'Topped it' },
   { id: 'green',    label: 'Green' },
   { id: 'hole',     label: 'Holed' },
 ];
@@ -857,7 +858,7 @@ function HomeScreen({ db, onStart, onResume, onOpen, onStats, onCaddy, onBag, on
               padding:'2px 8px', border:'1px solid var(--ink)', borderRadius:999,
               letterSpacing:'normal', textTransform:'none', color:'var(--ink)'
             }}>
-              hcp {handicap > 0 ? '+' : ''}{handicap}
+              hcp {handicap < 0 ? '+' : ''}{handicap}
             </span>
           )}
         </div>
@@ -932,7 +933,7 @@ function HomeScreen({ db, onStart, onResume, onOpen, onStats, onCaddy, onBag, on
                   <div className="display num" style={{fontSize:32, fontWeight:600, lineHeight:1, letterSpacing:'-0.02em', color: recentTotals.netTotal >= 0 ? 'var(--pos)' : 'var(--neg)'}}>
                     <SGNumber value={recentTotals.netTotal} />
                   </div>
-                  <div style={{fontSize:10, color:'var(--ink-faint)', letterSpacing:'0.12em', textTransform:'uppercase', marginTop:4}}>vs hcp {handicap > 0 ? '+' : ''}{handicap}</div>
+                  <div style={{fontSize:10, color:'var(--ink-faint)', letterSpacing:'0.12em', textTransform:'uppercase', marginTop:4}}>vs hcp {handicap < 0 ? '+' : ''}{handicap}</div>
                 </div>
               )}
             </div>
@@ -1733,9 +1734,13 @@ function ShotForm({ par, yardage, shotIdx, existing, lieBefore, distBefore, bag,
   const isPutt = lieBefore === 'green';
   const [lieAfter, setLieAfter] = useState(existing?.lie_after || (isPutt ? 'hole' : 'fairway'));
   const [distAfterStr, setDistAfterStr] = useState(
-    existing?.dist_after?.toString() || (isPutt ? '0' : '120')
+    existing?.dist_after?.toString() || (isPutt ? '3' : '120')
   );
   const [club, setClub] = useState(existing?.club || '');
+  const [direction, setDirection] = useState(existing?.direction || 'straight');
+  const [liePosition, setLiePosition] = useState(existing?.lie_position || '');
+  const [notes, setNotes] = useState(existing?.notes || '');
+  const [clubWarning, setClubWarning] = useState(false);
   const [showAllClubs, setShowAllClubs] = useState(false);
   const [suggestionDismissed, setSuggestionDismissed] = useState(false);
 
@@ -1771,12 +1776,16 @@ function ShotForm({ par, yardage, shotIdx, existing, lieBefore, distBefore, bag,
   }, [candidate, par, shotIdx]);
 
   const submit = () => {
+    if (!isPutt && !club) { setClubWarning(true); return; }
     onSubmit({
       lie_before: lieBefore,
       dist_before: distBefore,
       lie_after: isHoled ? 'hole' : lieAfter,
       dist_after: isHoled ? 0 : distAfter,
       ...(isPutt ? {} : { club: club || undefined }),
+      ...(isPutt ? {} : { direction }),
+      ...(liePosition ? { lie_position: liePosition } : {}),
+      ...(notes.trim() ? { notes: notes.trim() } : {}),
     });
   };
 
@@ -1866,8 +1875,9 @@ function ShotForm({ par, yardage, shotIdx, existing, lieBefore, distBefore, bag,
         {/* Club picker (skip for putts) */}
         {!isPutt && (
           <div className="mb-4">
-            <div style={{fontSize:11, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-faint)', marginBottom:8, display:'flex', justifyContent:'space-between', alignItems:'center'}}>
-              <span>Club {useBag && <span style={{opacity:0.7, marginLeft:4, textTransform:'none', letterSpacing:'normal', fontStyle:'italic'}}>· my bag</span>}</span>
+            <div style={{fontSize:11, letterSpacing:'0.14em', textTransform:'uppercase', marginBottom:8, display:'flex', justifyContent:'space-between', alignItems:'center',
+              color: clubWarning ? 'var(--neg)' : 'var(--ink-faint)'}}>
+              <span>Club {clubWarning && '— please select a club'} {useBag && !clubWarning && <span style={{opacity:0.7, marginLeft:4, textTransform:'none', letterSpacing:'normal', fontStyle:'italic'}}>· my bag</span>}</span>
               {club && (
                 <button onClick={() => setClub('')}
                   style={{fontSize:11, color:'var(--ink-faint)', background:'transparent', border:'none', cursor:'pointer', textTransform:'uppercase', letterSpacing:'0.1em', padding:0}}>
@@ -1937,11 +1947,39 @@ function ShotForm({ par, yardage, shotIdx, existing, lieBefore, distBefore, bag,
           </div>
         )}
 
-        {/* Distance after */}
-        {!isHoled && (
+        {/* Direction picker */}
+        {!isPutt && (
           <div className="mb-4">
             <div style={{fontSize:11, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-faint)', marginBottom:8}}>
-              Distance to hole {(lieAfter === 'green' || isPutt) ? '(feet)' : '(yards)'}
+              Direction
+            </div>
+            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8}}>
+              {[
+                { id: 'left',     label: '← Left' },
+                { id: 'straight', label: '↑ Straight' },
+                { id: 'right',    label: '→ Right' },
+              ].map(d => (
+                <button key={d.id}
+                  onClick={() => setDirection(d.id)}
+                  className="lie-pill"
+                  style={{
+                    background: direction === d.id ? 'var(--ink)' : 'var(--surface)',
+                    color: direction === d.id ? 'var(--surface)' : 'var(--ink)',
+                    borderColor: direction === d.id ? 'var(--ink)' : 'var(--line)',
+                    fontWeight: direction === d.id ? 600 : 400,
+                  }}>
+                  {d.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Distance after */}
+        {!isHoled && !isPutt && (
+          <div className="mb-4">
+            <div style={{fontSize:11, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-faint)', marginBottom:8}}>
+              Distance to hole {lieAfter === 'green' ? '(feet)' : '(yards)'}
             </div>
             <div className="num-input-wrap">
               <input
@@ -1952,10 +1990,7 @@ function ShotForm({ par, yardage, shotIdx, existing, lieBefore, distBefore, bag,
                 inputMode="numeric"
               />
               <div className="grid grid-cols-4 gap-2 mt-2">
-                {(lieAfter === 'green' || isPutt
-                  ? [-10, -3, +3, +10]
-                  : [-50, -10, +10, +50]
-                ).map(d => (
+                {[-50, -10, +10, +50].map(d => (
                   <button key={d}
                     onClick={() => setDistAfterStr(String(Math.max(0, distAfter + d)))}
                     className="btn btn-soft" style={{padding:'10px 0', fontSize:13}}>
@@ -1963,6 +1998,56 @@ function ShotForm({ par, yardage, shotIdx, existing, lieBefore, distBefore, bag,
                   </button>
                 ))}
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Putt distance — stepper only, no free text input to avoid crash */}
+        {!isHoled && isPutt && (
+          <div className="mb-4">
+            <div style={{fontSize:11, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-faint)', marginBottom:8}}>
+              Feet remaining
+            </div>
+            <div style={{display:'flex', alignItems:'center', gap:12, justifyContent:'center'}}>
+              {[1,2,3,5,10].map(step => (
+                <button key={`-${step}`}
+                  onClick={() => setDistAfterStr(String(Math.max(1, distAfter - step)))}
+                  style={{
+                    width:44, height:44, borderRadius:10, border:'1px solid var(--line)',
+                    background:'var(--surface)', fontSize:14, fontWeight:600,
+                    cursor:'pointer', fontFamily:'DM Sans, sans-serif', color:'var(--ink)'
+                  }}>-{step}</button>
+              )).reverse()}
+              <div style={{
+                minWidth:64, textAlign:'center',
+                fontFamily:'Fraunces, serif', fontSize:36, fontWeight:700,
+                letterSpacing:'-0.02em', lineHeight:1,
+              }}>
+                {distAfter}<span style={{fontSize:14, color:'var(--ink-faint)', marginLeft:2}}>ft</span>
+              </div>
+              {[1,2,3,5,10].map(step => (
+                <button key={`+${step}`}
+                  onClick={() => setDistAfterStr(String(distAfter + step))}
+                  style={{
+                    width:44, height:44, borderRadius:10, border:'1px solid var(--line)',
+                    background:'var(--surface)', fontSize:14, fontWeight:600,
+                    cursor:'pointer', fontFamily:'DM Sans, sans-serif', color:'var(--ink)'
+                  }}>+{step}</button>
+              ))}
+            </div>
+            <div style={{display:'flex', justifyContent:'center', gap:8, marginTop:12, flexWrap:'wrap'}}>
+              {[2,3,4,5,6,8,10,12,15,20].map(ft => (
+                <button key={ft}
+                  onClick={() => setDistAfterStr(String(ft))}
+                  style={{
+                    padding:'6px 12px', borderRadius:8,
+                    border: distAfter === ft ? '2px solid var(--ink)' : '1px solid var(--line)',
+                    background: distAfter === ft ? 'var(--ink)' : 'var(--surface)',
+                    color: distAfter === ft ? 'var(--surface)' : 'var(--ink)',
+                    fontSize:13, fontWeight:600, cursor:'pointer',
+                    fontFamily:'DM Sans, sans-serif',
+                  }}>{ft}ft</button>
+              ))}
             </div>
           </div>
         )}
@@ -1976,12 +2061,12 @@ function ShotForm({ par, yardage, shotIdx, existing, lieBefore, distBefore, bag,
               <button
                 onClick={() => { setLieAfter('hole'); setDistAfterStr('0'); }}
                 className={`lie-pill ${isHoled ? 'active' : ''}`}>
-                Holed
+                Holed ⛳
               </button>
               <button
                 onClick={() => { setLieAfter('green'); if (isHoled) setDistAfterStr('3'); }}
                 className={`lie-pill ${!isHoled ? 'active' : ''}`}>
-                Missed (ft remain)
+                Missed
               </button>
             </div>
           </div>
@@ -2047,6 +2132,53 @@ function ShotForm({ par, yardage, shotIdx, existing, lieBefore, distBefore, bag,
             </div>
           );
         })()}
+
+        {/* Lie position — above/below feet (all shots) */}
+        <div className="mb-4">
+          <div style={{fontSize:11, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-faint)', marginBottom:8}}>
+            Ball position <span style={{fontStyle:'italic', textTransform:'none', letterSpacing:'normal', opacity:0.7}}>· optional</span>
+          </div>
+          <div style={{display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8}}>
+            {[
+              { id: 'above_feet', label: '▲ Above feet' },
+              { id: 'level',      label: '— Level' },
+              { id: 'below_feet', label: '▼ Below feet' },
+            ].map(p => (
+              <button key={p.id}
+                onClick={() => setLiePosition(liePosition === p.id ? '' : p.id)}
+                className="lie-pill"
+                style={{
+                  background: liePosition === p.id ? 'var(--ink)' : 'var(--surface)',
+                  color: liePosition === p.id ? 'var(--surface)' : 'var(--ink)',
+                  borderColor: liePosition === p.id ? 'var(--ink)' : 'var(--line)',
+                  fontWeight: liePosition === p.id ? 600 : 400,
+                  fontSize: 12,
+                }}>
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Notes (optional, all shots) */}
+        <div className="mb-4">
+          <div style={{fontSize:11, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-faint)', marginBottom:8}}>
+            Notes <span style={{fontStyle:'italic', textTransform:'none', letterSpacing:'normal', opacity:0.7}}>· optional</span>
+          </div>
+          <textarea
+            value={notes}
+            onChange={e => setNotes(e.target.value)}
+            placeholder={isPutt ? 'e.g. left-to-right, fast, grain against…' : 'e.g. punched under tree, into wind…'}
+            rows={2}
+            style={{
+              width:'100%', boxSizing:'border-box',
+              padding:'10px 12px', borderRadius:10,
+              border:'1px solid var(--line)', background:'var(--surface)',
+              color:'var(--ink)', fontSize:14, fontFamily:'DM Sans, sans-serif',
+              resize:'none', outline:'none', lineHeight:1.5,
+            }}
+          />
+        </div>
 
         <button className="btn btn-primary" onClick={submit}>
           {existing ? 'Update shot' : 'Add shot'}
@@ -2115,7 +2247,7 @@ function RoundSummaryModal({ round, totals, handicap, onClose }) {
     `📅 ${fmtDate(round.date)}`,
     ``,
     `Score: ${totals.score} (${grossDiff > 0 ? '+' : ''}${grossDiff === 0 ? 'E' : grossDiff}) · Par ${totals.par} · ${totals.holesCompleted} holes`,
-    handicap != null ? `Net:   ${Math.round(totals.netScore)} (${netDiff > 0 ? '+' : ''}${netDiff === 0 ? 'E' : netDiff}) · Hcp ${handicap > 0 ? '+' : ''}${handicap}` : '',
+    handicap != null ? `Net:   ${Math.round(totals.netScore)} (${netDiff > 0 ? '+' : ''}${netDiff === 0 ? 'E' : netDiff}) · Hcp ${handicap < 0 ? '+' : ''}${handicap}` : '',
     ``,
     `Strokes Gained`,
     `  OTT   ${fmt(totals.OTT)}`,
@@ -2167,7 +2299,7 @@ function RoundSummaryModal({ round, totals, handicap, onClose }) {
           </div>
           {handicap != null && (
             <div>
-              <div style={{fontSize:10, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-faint)', marginBottom:2}}>Net (hcp {handicap > 0 ? '+' : ''}{handicap})</div>
+              <div style={{fontSize:10, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-faint)', marginBottom:2}}>Net (hcp {handicap < 0 ? '+' : ''}{handicap})</div>
               <div className="display num" style={{fontSize:28, fontWeight:700, lineHeight:1}}>
                 {Math.round(totals.netScore)}
                 <span style={{fontSize:14, color:'var(--ink-soft)', marginLeft:4}}>
@@ -2280,7 +2412,7 @@ function RoundDetailScreen({ round, onBack, onDelete, onCaddy, onEditRound, onUp
             </div>
             {handicap != null && (
               <div style={{paddingLeft:18, borderLeft:'1px solid var(--line-soft)'}}>
-                <div style={{fontSize:11, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-faint)'}}>vs hcp {handicap > 0 ? '+' : ''}{handicap}</div>
+                <div style={{fontSize:11, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-faint)'}}>vs hcp {handicap < 0 ? '+' : ''}{handicap}</div>
                 <div className="display num" style={{fontSize:32, fontWeight:600, lineHeight:1, letterSpacing:'-0.02em', color: totals.netTotal >= 0 ? 'var(--pos)' : 'var(--neg)'}}>
                   <SGNumber value={totals.netTotal} />
                 </div>
@@ -2647,7 +2779,7 @@ function SettingsScreen({ db, onUpdateSettings, clubStats, onBack }){
           )}
           {settings.handicap != null && isValidHcp && (
             <div style={{fontSize:11, color:'var(--ink-faint)', marginTop:8, fontStyle:'italic'}}>
-              Saved · current handicap {settings.handicap > 0 ? '+' : ''}{settings.handicap}
+              Saved · current handicap {settings.handicap < 0 ? '+' : ''}{settings.handicap}
             </div>
           )}
         </div>
