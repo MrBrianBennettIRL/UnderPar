@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, X, ChevronLeft, ChevronRight, BookOpen, Flag, Trash2, BarChart3, Check, MoreVertical, ArrowRight, Edit3, Compass, Target, MapPin, Briefcase, Settings } from 'lucide-react';
+import { Plus, X, ChevronLeft, ChevronRight, BookOpen, Flag, Trash2, BarChart3, Check, MoreVertical, ArrowRight, Edit3, Compass, Target, MapPin, Briefcase, Settings, Mic } from 'lucide-react';
 
 // ==============================
 // SG BASELINES (Broadie, scratch benchmark)
@@ -748,6 +748,7 @@ const FontStyles = () => (
 
     @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
     .fade-in { animation: fadeIn .25s ease both; }
+    @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.12); } }
 
     /* ── Utility classes (replaces Tailwind) ── */
     .flex               { display: flex; }
@@ -1597,11 +1598,85 @@ function ActiveRoundScreen({ round, onUpdateHole, onFinish, onAbandon, onBack, b
 }
 
 // ==============================
+// VOICE PARSER
+// ==============================
+function parseVoiceInput(transcript, lieBefore, distBefore, bag = []) {
+  const t = transcript.toLowerCase().trim();
+  const result = {};
+
+  // Club — check bag first, then common names
+  const allClubs = bag.length > 0 ? bag : [
+    'Driver','3 Wood','5 Wood','7 Wood','Hybrid','2 Iron','3 Iron','4 Iron',
+    '5 Iron','6 Iron','7 Iron','8 Iron','9 Iron','Pitching Wedge','Gap Wedge',
+    'Sand Wedge','Lob Wedge','Putter'
+  ];
+  for (const club of allClubs) {
+    const c = club.toLowerCase();
+    const aliases = {
+      'driver': ['driver','1 wood','big dog'],
+      'pitching wedge': ['pitching wedge','pw','p wedge'],
+      'gap wedge': ['gap wedge','gw','aw','approach wedge'],
+      'sand wedge': ['sand wedge','sw','s wedge'],
+      'lob wedge': ['lob wedge','lw','l wedge','60','58','56'],
+      'putter': ['putter','putt','putting'],
+    };
+    const checks = aliases[c] || [c, c.replace(' iron','i').replace(' wood','w')];
+    if (checks.some(a => t.includes(a))) { result.club = club; break; }
+  }
+  // Iron shorthand e.g. "7 iron", "8i"
+  if (!result.club) {
+    const ironMatch = t.match(/\b([2-9])\s*i(?:ron)?\b/);
+    if (ironMatch) result.club = `${ironMatch[1]} Iron`;
+  }
+
+  // Distance — "150 yards", "150 left", "150 to flag"
+  const distMatch = t.match(/\b(\d{1,3})\s*(?:yards?|yds?|y|left|to flag|feet?|ft)?\b/);
+  if (distMatch) {
+    const d = parseInt(distMatch[1]);
+    if (d > 0 && d < 700) result.dist_before = d;
+  }
+
+  // Lie/result after
+  const lieMap = {
+    fairway: ['fairway','fwy','short grass'],
+    rough: ['rough','long grass','deep rough'],
+    sand: ['sand','bunker','trap','sandy'],
+    green: ['green','on the green','gir','hit green','on green'],
+    hole: ['holed','in the hole','made it','sank it','in hole','hole'],
+    recovery: ['recovery','trees','punch','low punch','under trees'],
+    topped: ['topped','top','duff','duffed','thin','thinned'],
+  };
+  for (const [lie, keywords] of Object.entries(lieMap)) {
+    if (keywords.some(k => t.includes(k))) { result.lie_after = lie; break; }
+  }
+
+  // Direction
+  if (t.includes('left') && !t.includes('left to flag') && !t.includes('150 left')) result.direction = 'left';
+  else if (t.includes('right')) result.direction = 'right';
+  else if (t.includes('straight') || t.includes('middle') || t.includes('dead straight')) result.direction = 'straight';
+
+  // Ball position
+  if (t.includes('above feet') || t.includes('above foot')) result.lie_position = 'above_feet';
+  else if (t.includes('below feet') || t.includes('below foot')) result.lie_position = 'below_feet';
+  else if (t.includes('level')) result.lie_position = 'level';
+
+  // Notes — anything after "note" or "notes"
+  const noteMatch = t.match(/notes?\s+(.+)/);
+  if (noteMatch) result.notes = noteMatch[1].trim();
+
+  return result;
+}
+
+// ==============================
 // HOLE ENTRY
 // ==============================
 function HoleEntry({ hole, onUpdate, onPrev, onNext, bag, onClubUsed, clubStats, suggestionsEnabled }){
   const [showShotForm, setShowShotForm] = useState(false);
   const [editIdx, setEditIdx] = useState(null);
+  const [voicePrefill, setVoicePrefill] = useState(null);
+  const [voiceState, setVoiceState] = useState('idle'); // idle | listening | error
+  const [voiceError, setVoiceError] = useState('');
+  const recognitionRef = React.useRef(null);
 
   const shots = hole.shots || [];
   const last = shots[shots.length - 1];
@@ -1626,6 +1701,34 @@ function HoleEntry({ hole, onUpdate, onPrev, onNext, bag, onClubUsed, clubStats,
     if (s.club && onClubUsed) onClubUsed(s.club);
     setShowShotForm(false);
     setEditIdx(null);
+    setVoicePrefill(null);
+  };
+
+  const startVoice = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { setVoiceError('Voice not supported on this browser'); setVoiceState('error'); return; }
+    if (voiceState === 'listening') { recognitionRef.current?.stop(); setVoiceState('idle'); return; }
+    const rec = new SR();
+    recognitionRef.current = rec;
+    rec.lang = 'en-IE';
+    rec.interimResults = false;
+    rec.maxAlternatives = 1;
+    setVoiceState('listening');
+    setVoiceError('');
+    rec.onresult = (e) => {
+      const transcript = e.results[0][0].transcript;
+      const parsed = parseVoiceInput(transcript, nextLieBefore, nextDistBefore, bag);
+      setVoicePrefill({ ...parsed, _transcript: transcript });
+      setEditIdx(null);
+      setShowShotForm(true);
+      setVoiceState('idle');
+    };
+    rec.onerror = (e) => {
+      setVoiceError(e.error === 'no-speech' ? 'No speech detected — try again' : `Mic error: ${e.error}`);
+      setVoiceState('error');
+    };
+    rec.onend = () => { if (voiceState === 'listening') setVoiceState('idle'); };
+    rec.start();
   };
 
   const deleteShot = (i) => {
@@ -1791,14 +1894,57 @@ function HoleEntry({ hole, onUpdate, onPrev, onNext, bag, onClubUsed, clubStats,
           yardage={hole.yardage}
           shotIdx={editIdx !== null ? editIdx : shots.length}
           existing={editIdx !== null ? shots[editIdx] : null}
+          voicePrefill={editIdx !== null ? null : voicePrefill}
           lieBefore={editIdx !== null ? shots[editIdx].lie_before : nextLieBefore}
           distBefore={editIdx !== null ? shots[editIdx].dist_before : nextDistBefore}
           bag={bag || []}
           clubStats={clubStats}
           suggestionsEnabled={suggestionsEnabled}
           onSubmit={addShot}
-          onCancel={() => { setShowShotForm(false); setEditIdx(null); }}
+          onCancel={() => { setShowShotForm(false); setEditIdx(null); setVoicePrefill(null); }}
         />
+      )}
+
+      {/* Floating mic button */}
+      {!holeDone && (
+        <button
+          onClick={startVoice}
+          style={{
+            position:'fixed', bottom:84, right:20, zIndex:200,
+            width:56, height:56, borderRadius:'50%',
+            background: voiceState === 'listening' ? 'var(--neg)' : 'var(--ink)',
+            color:'var(--surface)', border:'none', cursor:'pointer',
+            display:'flex', alignItems:'center', justifyContent:'center',
+            boxShadow:'0 4px 16px rgba(0,0,0,0.25)',
+            transition:'background 0.2s',
+          }}
+          aria-label="Voice log shot"
+        >
+          {voiceState === 'listening'
+            ? <span style={{fontSize:22}}>🎙️</span>
+            : <Mic size={22}/>
+          }
+        </button>
+      )}
+
+      {voiceState === 'listening' && (
+        <div style={{
+          position:'fixed', bottom:150, right:16, zIndex:200,
+          background:'var(--ink)', color:'var(--surface)',
+          padding:'8px 14px', borderRadius:10, fontSize:13, fontWeight:500,
+          boxShadow:'0 2px 8px rgba(0,0,0,0.2)',
+        }}>
+          Listening… speak your shot
+        </div>
+      )}
+      {voiceState === 'error' && voiceError && (
+        <div style={{
+          position:'fixed', bottom:150, right:16, zIndex:200,
+          background:'var(--neg)', color:'#fff',
+          padding:'8px 14px', borderRadius:10, fontSize:13,
+        }} onClick={() => setVoiceState('idle')}>
+          {voiceError}
+        </div>
       )}
     </div>
   );
@@ -1807,16 +1953,17 @@ function HoleEntry({ hole, onUpdate, onPrev, onNext, bag, onClubUsed, clubStats,
 // ==============================
 // SHOT FORM (modal)
 // ==============================
-function ShotForm({ par, yardage, shotIdx, existing, lieBefore, distBefore, bag, clubStats, suggestionsEnabled, onSubmit, onCancel }){
+function ShotForm({ par, yardage, shotIdx, existing, voicePrefill, lieBefore, distBefore, bag, clubStats, suggestionsEnabled, onSubmit, onCancel }){
   const isPutt = lieBefore === 'green';
-  const [lieAfter, setLieAfter] = useState(existing?.lie_after || (isPutt ? 'hole' : 'fairway'));
+  const vp = voicePrefill || {};
+  const [lieAfter, setLieAfter] = useState(existing?.lie_after || vp.lie_after || (isPutt ? 'hole' : 'fairway'));
   const [distAfterStr, setDistAfterStr] = useState(
-    existing?.dist_after?.toString() || (isPutt ? '3' : '120')
+    existing?.dist_after?.toString() || (isPutt ? '3' : (vp.dist_before?.toString() || '120'))
   );
-  const [club, setClub] = useState(existing?.club || '');
-  const [direction, setDirection] = useState(existing?.direction || 'straight');
-  const [liePosition, setLiePosition] = useState(existing?.lie_position || '');
-  const [notes, setNotes] = useState(existing?.notes || '');
+  const [club, setClub] = useState(existing?.club || vp.club || '');
+  const [direction, setDirection] = useState(existing?.direction || vp.direction || 'straight');
+  const [liePosition, setLiePosition] = useState(existing?.lie_position || vp.lie_position || '');
+  const [notes, setNotes] = useState(existing?.notes || vp.notes || '');
   const [clubWarning, setClubWarning] = useState(false);
   const [showAllClubs, setShowAllClubs] = useState(false);
   const [suggestionDismissed, setSuggestionDismissed] = useState(false);
@@ -1874,6 +2021,16 @@ function ShotForm({ par, yardage, shotIdx, existing, lieBefore, distBefore, bag,
   return (
     <Modal onClose={onCancel}>
       <div>
+        {/* Voice transcript banner */}
+        {vp._transcript && (
+          <div style={{
+            background:'var(--ink)', color:'var(--surface)',
+            borderRadius:10, padding:'9px 14px', marginBottom:12,
+            fontSize:13, fontStyle:'italic', opacity:0.9,
+          }}>
+            🎙️ "{vp._transcript}"
+          </div>
+        )}
         <div className="flex items-center justify-between mb-1">
           <div style={{fontSize:11, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-faint)', fontWeight:600}}>
             Shot {shotIdx + 1} {isPutt ? '· Putt' : ''}
