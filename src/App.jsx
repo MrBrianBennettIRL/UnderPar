@@ -447,9 +447,11 @@ function holeTotals(hole, holeStrokes = 0){
 function roundTotals(round, handicap = null){
   const t = { OTT:0, APP:0, ARG:0, PUTT:0, total:0, netTotal:0,
               score:0, netScore:0, par:0, holesCompleted:0,
-              holesPlayedCount: round?.holes?.length || 0 };
+              holesPlayedCount: round?.holes?.length || 0,
+              fir:0, firOpportunities:0, gir:0, girOpportunities:0,
+              totalPutts:0, saves:0, saveOpportunities:0,
+              putts1:0, putts2:0, putts3:0, putts4plus:0 };
   if (!round?.holes) return t;
-  // Pre-compute strokes-per-hole using full course holes (so SI allocation respects course shape even if some holes are incomplete)
   const allHoles = round.holes;
   const strokesArr = handicap != null ? strokesPerHole(allHoles, handicap) : allHoles.map(() => 0);
   round.holes.forEach((h, idx) => {
@@ -461,6 +463,38 @@ function roundTotals(round, handicap = null){
     t.score += h.shots.length;
     t.netScore += netHoleScore(h.shots.length, holeStrokes);
     t.par += h.par; t.holesCompleted += 1;
+
+    const shots = h.shots || [];
+    // Putts = shots from green
+    const putts = shots.filter(s => s.lie_before === 'green' || (s.lie_before === 'hole')).length;
+    t.totalPutts += putts;
+    if (putts === 1) t.putts1++;
+    else if (putts === 2) t.putts2++;
+    else if (putts === 3) t.putts3++;
+    else if (putts >= 4) t.putts4plus++;
+
+    // FIR — par 4s and 5s only; hit fairway if shot 1 lie_after === 'fairway'
+    if (h.par >= 4) {
+      t.firOpportunities++;
+      if (shots[0]?.lie_after === 'fairway') t.fir++;
+    }
+
+    // GIR — on green in par minus 2 shots or fewer
+    const girTarget = h.par - 2;
+    const onGreenShot = shots.findIndex(s => s.lie_after === 'green' || s.lie_after === 'hole');
+    if (onGreenShot !== -1) {
+      t.girOpportunities++;
+      if (onGreenShot + 1 <= girTarget) t.gir++; // shot index + 1 = shot number
+    } else {
+      t.girOpportunities++;
+    }
+
+    // Saves — missed GIR but still made par or better
+    const missedGIR = onGreenShot === -1 || (onGreenShot + 1 > girTarget);
+    if (missedGIR) {
+      t.saveOpportunities++;
+      if (h.shots.length <= h.par) t.saves++;
+    }
   });
   return t;
 }
@@ -1398,6 +1432,12 @@ function ActiveRoundScreen({ round, onUpdateHole, onFinish, onAbandon, onBack, b
                 <span style={{fontSize:10, color:'var(--ink-faint)', marginLeft:4, fontFamily:'DM Sans', letterSpacing:'0.1em'}}>NET</span>
               </div>
             )}
+            {totals.totalPutts > 0 && (
+              <div className="display num" style={{fontSize:16, fontWeight:600, letterSpacing:'-0.02em', color:'var(--ink-soft)'}}>
+                {totals.totalPutts}
+                <span style={{fontSize:10, color:'var(--ink-faint)', marginLeft:4, fontFamily:'DM Sans', letterSpacing:'0.1em'}}>PUTTS</span>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -1498,6 +1538,45 @@ function ActiveRoundScreen({ round, onUpdateHole, onFinish, onAbandon, onBack, b
                 ? `${round.holes.length} holes complete. SG total ${fmt(totals.total)}.`
                 : `${totals.holesCompleted}/${round.holes.length} holes complete. Incomplete holes won't count.`}
             </div>
+
+            {/* Stats summary */}
+            {totals.holesCompleted > 0 && (
+              <div style={{marginBottom:18}}>
+                <div style={{fontSize:11, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-faint)', marginBottom:10}}>
+                  Round stats
+                </div>
+                <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:8}}>
+                  {[
+                    ['FIR', `${totals.fir}/${totals.firOpportunities}`, totals.fir / Math.max(1, totals.firOpportunities) >= 0.6 ? 'var(--pos)' : 'var(--ink)'],
+                    ['GIR', `${totals.gir}/${totals.girOpportunities}`, totals.gir / Math.max(1, totals.girOpportunities) >= 0.5 ? 'var(--pos)' : 'var(--ink)'],
+                    ['Saves', `${totals.saves}/${totals.saveOpportunities}`, 'var(--ink)'],
+                    ['Putts', `${totals.totalPutts}`, totals.totalPutts / Math.max(1, totals.holesCompleted) <= 1.9 ? 'var(--pos)' : totals.totalPutts / Math.max(1, totals.holesCompleted) >= 2.2 ? 'var(--neg)' : 'var(--ink)'],
+                  ].map(([label, value, col]) => (
+                    <div key={label} style={{
+                      display:'flex', justifyContent:'space-between', alignItems:'center',
+                      padding:'10px 14px', borderRadius:10,
+                      background:'var(--surface-raised)', border:'1px solid var(--line)',
+                    }}>
+                      <span style={{fontSize:12, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--ink-faint)'}}>{label}</span>
+                      <span className="display num" style={{fontSize:20, fontWeight:700, color: col}}>{value}</span>
+                    </div>
+                  ))}
+                </div>
+                {/* Putt breakdown */}
+                <div style={{display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:6}}>
+                  {[['1✓', totals.putts1, 'var(--pos)'], ['2', totals.putts2, 'var(--ink)'], ['3', totals.putts3, 'var(--neg)'], ['4+', totals.putts4plus, 'var(--neg)']].map(([label, count, col]) => (
+                    <div key={label} style={{
+                      textAlign:'center', padding:'8px 4px', borderRadius:10,
+                      background:'var(--surface-raised)', border:'1px solid var(--line)',
+                    }}>
+                      <div className="display num" style={{fontSize:20, fontWeight:700, color: count > 0 ? col : 'var(--ink-faint)'}}>{count}</div>
+                      <div style={{fontSize:10, color:'var(--ink-faint)', marginTop:2, letterSpacing:'0.06em', textTransform:'uppercase'}}>{label} putt</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="space-y-2">
               <button className="btn btn-primary" onClick={() => onFinish()}>
                 Save round
