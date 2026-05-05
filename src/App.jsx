@@ -1556,17 +1556,15 @@ function HoleEntry({ hole, onUpdate, onPrev, onNext, bag, onClubUsed, clubStats,
   return (
     <div className="px-5">
       {/* Hole header */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <button className="btn-icon" onClick={onPrev} disabled={!onPrev} style={{opacity: onPrev ? 1 : 0.3}}>
-            <ChevronLeft size={18}/>
-          </button>
-          <div>
-            <div style={{fontSize:11, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-faint)'}}>
-              {hole.name ? `Hole · ${hole.name}` : 'Hole'}
-            </div>
-            <div className="display" style={{fontSize:36, fontWeight:600, lineHeight:1, letterSpacing:'-0.03em'}}>{hole.hole_num}</div>
+      <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16}}>
+        <button className="btn-icon" onClick={onPrev} disabled={!onPrev} style={{opacity: onPrev ? 1 : 0.3}}>
+          <ChevronLeft size={18}/>
+        </button>
+        <div style={{textAlign:'center', flex:1}}>
+          <div style={{fontSize:11, letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--ink-faint)'}}>
+            {hole.name ? `Hole · ${hole.name}` : 'Hole'}
           </div>
+          <div className="display" style={{fontSize:36, fontWeight:600, lineHeight:1, letterSpacing:'-0.03em'}}>{hole.hole_num}</div>
         </div>
         <button className="btn-icon" onClick={onNext} disabled={!onNext} style={{opacity: onNext ? 1 : 0.3}}>
           <ChevronRight size={18}/>
